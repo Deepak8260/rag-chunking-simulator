@@ -4,10 +4,16 @@
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
-  const HUES = [212, 28, 150, 276, 46, 338, 186, 96, 252, 8];
-  const hue = (i) => HUES[i % HUES.length];
-  const tint = (i, a) => `hsl(${hue(i)} 85% var(--chunk-l) / ${a || "var(--chunk-a)"})`;
-  const solid = (i) => `hsl(${hue(i)} 65% 46%)`;
+  // Curated chunk palette; `on` is the readable text colour on top of each swatch.
+  const PALETTE = [
+    { c: "#E4572E", on: "#fff" }, { c: "#3A62B0", on: "#fff" }, { c: "#E9A23B", on: "#1B1F23" }, { c: "#1F9E89", on: "#fff" },
+    { c: "#D14D72", on: "#fff" }, { c: "#5B8E3E", on: "#fff" }, { c: "#8357A8", on: "#fff" }, { c: "#1683A8", on: "#fff" },
+  ];
+  const solid = (i) => PALETTE[i % PALETTE.length].c;
+  const onColor = (i) => PALETTE[i % PALETTE.length].on;
+  const tint = (i, pct) => `color-mix(in srgb, ${solid(i)} ${pct || "var(--tint)"}, transparent)`;
+  // Each strategy's signature colour.
+  const S_COLORS = { fixed: "#E4572E", recursive: "#E9A23B", token: "#1F9E89", sentence: "#3A62B0", paragraph: "#8357A8", sliding: "#D14D72", structure: "#5B8E3E", semantic: "#1683A8" };
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const fmt = (n) => Math.round(n).toLocaleString();
 
@@ -169,6 +175,8 @@
     },
   ];
 
+  STRATEGIES.forEach((s) => (s.color = S_COLORS[s.id]));
+
   const TABS = [["map", "Chunk map"], ["chunks", "Chunks"], ["retrieval", "Retrieval test"], ["breakpoints", "Breakpoints"], ["how", "How it works"]];
 
   const byId = Object.fromEntries(STRATEGIES.map((s) => [s.id, s]));
@@ -199,17 +207,76 @@
     };
   }
 
+  // A strategy's "fingerprint": every chunk drawn in the strategy's colour at its
+  // position in the document, alternating between two lanes so overlaps show.
+  function laneHTML(chunks, len, color) {
+    return `<div class="lane">${chunks
+      .map((c) => `<i title="Chunk ${c.id + 1}: ${c.text.length} chars" style="left:${(c.start / len) * 100}%;width:${Math.max(0.3, ((c.end - c.start) / len) * 100)}%;top:${c.id % 2 ? 50 : 0}%;background:${color};opacity:${c.id % 2 ? 0.55 : 1}"></i>`)
+      .join("")}</div>`;
+  }
+
   // ---------- overview ----------
-  $("#strategyCards").innerHTML = STRATEGIES.map(
-    (s, i) => `<a class="s-card" href="#/sim/${s.id}"><span class="num">0${i + 1}</span><h3>${s.name}</h3><p>${s.short}</p><span class="go">Try it →</span></a>`
-  ).join("");
+  $("#strategyCards").innerHTML = STRATEGIES.map((s, i) => {
+    const text = SAMPLES.markdown.text;
+    const lane = laneHTML(s.run(text, state.params[s.id]).chunks, text.length, s.color);
+    return `<a class="s-card" href="#/sim/${s.id}" style="--s:${s.color}">
+      <div class="top"><span class="num">0${i + 1}</span><span class="dot"></span></div>
+      <h3>${s.name}</h3><p>${s.short}</p>${lane}
+      <span class="go">Explore <span>→</span></span></a>`;
+  }).join("");
+
+  // Hero demo: one short text, re-chunked by each strategy in turn.
+  const DEMO_TEXT = "RAG gives a language model an open book. Before it answers, it searches your documents for the passages that matter.\n\nThose passages are chunks. Their size and their edges decide what the model gets to read, and whether the answer is in there at all.";
+  const DEMO_PARAMS = {
+    fixed: { size: 64, overlap: 0 }, recursive: { size: 90, overlap: 20, preset: "generic" }, token: { size: 14, overlap: 0 },
+    sentence: { maxChars: 120, overlap: 0 }, paragraph: { maxChars: 100 }, sliding: { window: 2, stride: 1 },
+    structure: { maxChars: 140, prependPath: false }, semantic: { percentile: 60, buffer: 0 },
+  };
+  let demoIdx = 0, demoTimer = null, demoPaused = false;
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  $("#demoSteps").innerHTML = STRATEGIES.map((s, i) => `<button role="tab" data-i="${i}" style="--c:${s.color}" aria-label="${s.name}"></button>`).join("");
+
+  function showDemo(i, animate) {
+    demoIdx = i;
+    const s = STRATEGIES[i], chunks = s.run(DEMO_TEXT, DEMO_PARAMS[s.id]).chunks;
+    const paint = () => {
+      $("#heroDemo").style.setProperty("--s", s.color);
+      $("#demoName").textContent = s.name;
+      $("#demoCount").textContent = `${chunks.length} chunks`;
+      $("#demoText").innerHTML = mapHTML(DEMO_TEXT, chunks);
+      $$("#demoSteps button").forEach((b, k) => b.setAttribute("aria-selected", k === i));
+      $("#demoText").classList.remove("fade");
+    };
+    if (!animate || reduceMotion) return paint();
+    $("#demoText").classList.add("fade");
+    setTimeout(paint, 200);
+  }
+  function startDemo() {
+    clearInterval(demoTimer);
+    if (reduceMotion) return;
+    demoTimer = setInterval(() => { if (!demoPaused && state.page === "home") showDemo((demoIdx + 1) % STRATEGIES.length, true); }, 3200);
+  }
+  $("#demoSteps").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (b) { showDemo(Number(b.dataset.i), true); startDemo(); }
+  });
+  $("#heroDemo").addEventListener("mouseenter", () => (demoPaused = true));
+  $("#heroDemo").addEventListener("mouseleave", () => (demoPaused = false));
 
   // ---------- simulator ----------
   function renderSidebar() {
-    $("#stratList").innerHTML = STRATEGIES.map((s) => `<a href="#/sim/${s.id}" class="${s.id === state.active ? "active" : ""}">${s.name}</a>`).join("");
-    const s = byId[state.active];
+    $("#stratList").innerHTML = STRATEGIES.map((s) => `<a href="#/sim/${s.id}" style="--c:${s.color}" class="${s.id === state.active ? "active" : ""}"><i></i>${s.name}</a>`).join("");
+    const s = byId[state.active], n = STRATEGIES.indexOf(s) + 1;
+    $("#page-sim").style.setProperty("--s", s.color);
+    $("#simKicker").textContent = `Strategy ${n} of ${STRATEGIES.length}`;
     $("#simTitle").textContent = s.name + " chunking";
     $("#simDesc").textContent = s.short;
+  }
+
+  // paints the filled part of a range track (WebKit has no native "progress")
+  function setFill(el) {
+    el.style.setProperty("--fill", ((el.value - el.min) / (el.max - el.min)) * 100 + "%");
   }
 
   function renderParams() {
@@ -227,6 +294,7 @@
         return `<div class="ctl check"><label><input type="checkbox" data-key="${p.key}"${v ? " checked" : ""} />${p.label}</label></div>`;
       })
       .join("");
+    $$('#params input[type="range"]').forEach(setFill);
   }
 
   $("#params").addEventListener("input", (e) => {
@@ -235,6 +303,7 @@
     state.params[state.active][key] = el.type === "checkbox" ? el.checked : el.type === "range" ? Number(el.value) : el.value;
     const out = document.getElementById("o-" + key);
     if (out) out.textContent = el.value;
+    if (el.type === "range") setFill(el);
     schedule(renderResults, 30);
   });
 
@@ -265,8 +334,13 @@
   }
 
   function renderMap(res) {
-    const text = state.text, chunks = res.chunks;
-    if (!text.trim()) { $("#docMap").innerHTML = `<div class="empty">The document is empty. Use “Edit text” to add some.</div>`; return; }
+    $("#docMap").innerHTML = state.text.trim()
+      ? mapHTML(state.text, res.chunks)
+      : `<div class="empty">The document is empty. Use “Edit text” to add some.</div>`;
+  }
+
+  // Colours the text by chunk; text covered by two chunks gets stripes.
+  function mapHTML(text, chunks) {
     const pts = new Set([0, text.length]);
     chunks.forEach((c) => { pts.add(c.start); pts.add(c.end); });
     const cuts = [...pts].sort((a, b) => a - b);
@@ -280,17 +354,17 @@
       const a = cuts[k], b = cuts[k + 1];
       while (ptr < sorted.length && sorted[ptr].start <= a) active.push(sorted[ptr++]);
       active = active.filter((c) => c.end > a);
-      (startsAt.get(a) || []).forEach((id) => html.push(`<span class="mark" style="--c:${solid(id)}">${id + 1}</span>`));
+      (startsAt.get(a) || []).forEach((id) => html.push(`<span class="mark" style="--c:${solid(id)};--on:${onColor(id)}">${id + 1}</span>`));
       const piece = esc(text.slice(a, b));
       if (!active.length) { html.push(`<span class="gap">${piece}</span>`); continue; }
       const ids = active.map((c) => c.id);
       const bg = ids.length === 1
         ? tint(ids[0])
-        : `repeating-linear-gradient(135deg, ${ids.map((id, j) => `${tint(id, 0.45)} ${j * 5}px ${(j + 1) * 5}px`).join(", ")})`;
-      const title = ids.map((id) => `Chunk ${id + 1} · ${chunks[id].chars} chars`).join("\n");
+        : `repeating-linear-gradient(135deg, ${ids.map((id, j) => `${tint(id, "42%")} ${j * 5}px ${(j + 1) * 5}px`).join(", ")})`;
+      const title = ids.map((id) => `Chunk ${id + 1} · ${chunks[id].text.length} chars`).join("\n");
       html.push(`<span class="seg" data-c="${ids.join(" ")}" title="${title}" style="background:${bg}">${piece}</span>`);
     }
-    $("#docMap").innerHTML = html.join("");
+    return html.join("");
   }
 
   function chunkCard(c, extra) {
@@ -351,7 +425,7 @@
       <h3>The idea</h3><p class="lead">${i.idea}</p>
       <h3>Example</h3>${renderExample(s)}
       <h3>Step by step</h3><ol>${i.steps.map((x) => `<li>${x}</li>`).join("")}</ol>
-      <h3>The settings</h3><dl class="settings">${i.settings.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+      <h3>The settings</h3><dl class="settings">${i.settings.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
       <div class="pc"><div><h3>Good at</h3>${list(i.good)}</div><div><h3>Watch out for</h3>${list(i.watch)}</div></div>
       <h3>Use it for</h3><p>${i.use}</p>
       ${i.note ? `<div class="note">${i.note}</div>` : ""}</div>`;
@@ -391,10 +465,7 @@
     const L = Math.max(1, state.text.length);
     const rows = STRATEGIES.map((s) => {
       const res = runStrategy(s), st = statsOf(res.chunks);
-      const bars = res.chunks
-        .map((c) => `<i title="Chunk ${c.id + 1}: ${c.chars} chars" style="left:${(c.start / L) * 100}%;width:${Math.max(0.15, ((c.end - c.start) / L) * 100)}%;top:${c.id % 2 ? 50 : 0}%;background:${solid(c.id)}"></i>`)
-        .join("");
-      return `<tr><td class="name"><a href="#/sim/${s.id}">${s.name}</a></td><td class="num">${st.n}</td><td class="num">${fmt(st.avg)}</td><td class="num range">${st.min}–${st.max}</td><td class="lane-cell"><div class="lane">${bars}</div></td></tr>`;
+      return `<tr><td class="name"><a href="#/sim/${s.id}" style="--c:${s.color}"><i></i>${s.name}</a></td><td class="num">${st.n}</td><td class="num">${fmt(st.avg)}</td><td class="num range">${st.min}–${st.max}</td><td class="lane-cell">${laneHTML(res.chunks, L, s.color)}</td></tr>`;
     });
     $("#compare").innerHTML = `<table class="cmp"><thead><tr><th>Strategy</th><th class="num">Chunks</th><th class="num">Avg chars</th><th class="num range">Range</th><th>Position in document</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
   }
@@ -498,5 +569,7 @@
   window.addEventListener("hashchange", route);
 
   setText(SAMPLES.markdown.text, "markdown");
+  showDemo(0, false);
+  startDemo();
   route();
 })();

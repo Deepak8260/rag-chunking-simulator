@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chunk Lab</title>
+  <meta name="description" content="Interactive simulator for RAG chunking strategies: fixed-size, recursive, token-based, sentence, paragraph, sliding window, structure-aware and semantic chunking." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='4' width='28' height='6' rx='2' fill='%234f46e5'/%3E%3Crect x='2' y='13' width='18' height='6' rx='2' fill='%23f59e0b'/%3E%3Crect x='2' y='22' width='24' height='6' rx='2' fill='%2310b981'/%3E%3C/svg%3E" />
+  <script>
+    try { var t = localStorage.getItem("chunklab-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Chunk Lab</span>
+      <small>RAG chunking simulator</small>
+    </div>
+    <button id="themeBtn" class="icon-btn" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
+  </header>
+
+  <main class="wrap">
+    <section class="intro">
+      <h1>See how your documents get chunked before they get embedded</h1>
+      <p>Paste text or load a sample, pick a strategy, tune the knobs, and watch chunk boundaries, overlaps and retrieval results update live. Everything runs in your browser — nothing is uploaded.</p>
+    </section>
+
+    <nav class="tabs" id="tabs" aria-label="Chunking strategies"></nav>
+
+    <div class="grid">
+      <aside class="col">
+        <div class="card">
+          <div class="card-h">
+            <h2>Document</h2>
+            <label class="btn ghost small">Upload file<input id="file" type="file" accept=".txt,.md,.markdown,.py,.js,.ts,.json,.csv,.html,.xml,.rst" hidden /></label>
+          </div>
+          <select id="sample" class="select" aria-label="Sample document"></select>
+          <textarea id="input" spellcheck="false" aria-label="Document text"></textarea>
+          <div class="muted small" id="docMeta"></div>
+        </div>
+
+        <div class="card">
+          <h2>Parameters</h2>
+          <div id="controls" class="controls"></div>
+        </div>
+
+        <div class="card info" id="info"></div>
+      </aside>
+
+      <section class="col">
+        <div id="singleView">
+          <div class="card">
+            <div class="stats" id="stats"></div>
+            <div class="sizechart-wrap">
+              <div class="row-between"><span class="label">Chunk sizes, in order</span><span class="muted small" id="sizeLegend"></span></div>
+              <div class="sizechart" id="sizechart"></div>
+            </div>
+          </div>
+
+          <div class="card" id="semanticCard" hidden>
+            <div class="row-between"><h2>Semantic distance between consecutive sentences</h2><span class="muted small" id="semLegend"></span></div>
+            <div id="semChart"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h2>Retrieval test <span class="muted small">(BM25 over the chunks)</span></h2>
+            </div>
+            <div class="query-row">
+              <input id="query" type="search" placeholder="Ask something, e.g. “how should code blocks be handled?”" />
+              <select id="topk" class="select narrow" aria-label="Top k">
+                <option value="1">top 1</option><option value="3" selected>top 3</option><option value="5">top 5</option>
+              </select>
+            </div>
+            <div id="hits" class="hits"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h2>Chunk map</h2>
+              <span class="muted small">Hover a chunk to link it with its card. <span class="ov-key"></span> = overlap</span>
+            </div>
+            <div class="doc" id="doc"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h2>Chunks</h2>
+              <button id="download" class="btn ghost small">Download JSON</button>
+            </div>
+            <div class="chunks" id="chunks"></div>
+          </div>
+        </div>
+
+        <div id="compareView" hidden>
+          <div class="card">
+            <h2>All strategies on the same document</h2>
+            <p class="muted small">Each strategy uses its current parameters. Bars show where each chunk sits in the document; chunks alternate between two lanes so overlaps are visible.</p>
+            <div id="compare"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card learn">
+      <h2>Choosing a strategy</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Strategy</th><th>Unit of size</th><th>Respects meaning?</th><th>Good default for</th></tr></thead>
+          <tbody>
+            <tr><td>Fixed-size</td><td>Characters</td><td>No</td><td>Baselines, logs, uniform data</td></tr>
+            <tr><td>Recursive</td><td>Characters</td><td>Partly (separators)</td><td>Most general text; code with language presets</td></tr>
+            <tr><td>Token-based</td><td>Tokens</td><td>No</td><td>Hard model context limits, cost control</td></tr>
+            <tr><td>Sentence</td><td>Sentences</td><td>Yes, sentence level</td><td>Q&amp;A over articles, FAQs</td></tr>
+            <tr><td>Paragraph</td><td>Paragraphs</td><td>Yes, paragraph level</td><td>Well-written prose, essays, reports</td></tr>
+            <tr><td>Sliding window</td><td>Sentences</td><td>Yes, with redundancy</td><td>Dense facts that span sentences</td></tr>
+            <tr><td>Structure-aware</td><td>Sections / blocks</td><td>Yes, document layout</td><td>Docs, wikis, Markdown/HTML, manuals</td></tr>
+            <tr><td>Semantic</td><td>Topic shifts</td><td>Yes, meaning</td><td>Long, loosely structured text</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Beyond this simulator</h3>
+      <ul>
+        <li><b>Agentic / LLM-based chunking</b> — an LLM decides where to split, or rewrites text into standalone “propositions”.</li>
+        <li><b>Parent-document retrieval</b> — search small chunks, but send their larger parent section to the LLM.</li>
+        <li><b>Late chunking</b> — embed the whole document with a long-context model first, then pool token embeddings per chunk so each keeps global context.</li>
+        <li><b>Contextual retrieval</b> — prepend an LLM-written summary of where the chunk sits in the document (like the heading path option in Structure-aware).</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer muted small">
+    Chunk Lab · open source, runs entirely client-side · token counts are a GPT-style approximation · semantic chunking uses TF-IDF vectors as a stand-in for neural embeddings
+  </footer>
+
+  <script src="chunkers.js"></script>
+  <script src="samples.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

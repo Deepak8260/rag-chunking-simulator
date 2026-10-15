@@ -1,130 +1,178 @@
-/* Chunk Lab — UI wiring. */
+/* Chunk Lab — UI wiring: hash router, simulator, compare view. */
 (function () {
   "use strict";
 
   const $ = (s) => document.querySelector(s);
+  const $$ = (s) => document.querySelectorAll(s);
   const HUES = [212, 28, 150, 276, 46, 338, 186, 96, 252, 8];
   const hue = (i) => HUES[i % HUES.length];
   const tint = (i, a) => `hsl(${hue(i)} 85% var(--chunk-l) / ${a || "var(--chunk-a)"})`;
   const solid = (i) => `hsl(${hue(i)} 65% 46%)`;
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString();
+  const fmt = (n) => Math.round(n).toLocaleString();
 
-  const range = (key, label, min, max, step, value, hint) => ({ type: "range", key, label, min, max, step, value, hint });
+  const range = (key, label, min, max, step, value) => ({ type: "range", key, label, min, max, step, value });
 
+  // `info` drives the "How it works" tab. Each example is run through the real
+  // chunker at render time, so what beginners see is always the true output.
   const STRATEGIES = [
     {
-      id: "fixed", name: "Fixed-size", sizeKey: "size",
+      id: "fixed", name: "Fixed-size",
+      short: "Cuts the text every N characters, regardless of words or sentences.",
       params: [range("size", "Chunk size (characters)", 50, 2000, 10, 300), range("overlap", "Overlap (characters)", 0, 500, 5, 50)],
       run: Chunkers.fixed,
       info: {
-        summary: "Cuts the text every <b>N characters</b>, no matter what is there — mid-word, mid-sentence, mid-table. Optional overlap repeats the tail of each chunk at the start of the next.",
-        how: ["Start at character 0.", "Take the next N characters as one chunk.", "Step forward by N − overlap.", "Repeat until the end of the document."],
-        pros: ["Trivial to implement and reason about", "Predictable, uniform chunk sizes", "Very fast"],
-        cons: ["Splits words and sentences", "Ignores document structure", "Boundaries carry no meaning"],
-        best: "Baselines, logs, uniform machine-generated text.",
+        idea: "Imagine cutting a long ribbon into pieces that are all exactly 20 cm long. You don't look at what's printed on the ribbon — you just measure and cut. Fixed-size chunking does the same with text: every chunk gets exactly the same number of characters (letters, spaces and punctuation all count).",
+        example: { text: "The cat sat on the mat. The dog slept on the rug.", params: { size: 20, overlap: 0 }, caption: "Chunk size = 20 characters. Notice how “mat” is cut into “m” and “at” — the splitter doesn't care where words end." },
+        steps: ["Count 20 characters from the start. That's chunk 1.", "Count the next 20 characters. That's chunk 2.", "Keep going until you run out of text. The last chunk is whatever is left."],
+        settings: [
+          ["Chunk size", "How many characters go into each chunk. Bigger chunks carry more context; smaller chunks are more focused."],
+          ["Overlap", "How many characters each chunk repeats from the end of the one before. With an overlap of 5, chunk 2 starts 5 characters earlier — at “the mat.” — so the word “mat” appears whole at least once."],
+        ],
+        good: ["The easiest strategy to understand and build", "Every chunk is the same size, so cost is predictable"],
+        watch: ["Words and sentences get cut in half", "A chunk can start in the middle of one idea and end in another"],
+        use: "A simple starting point to compare other strategies against, or text with no structure at all, such as log files.",
       },
     },
     {
-      id: "recursive", name: "Recursive", sizeKey: "size",
+      id: "recursive", name: "Recursive",
+      short: "Splits on paragraphs, then lines, sentences and words — only going finer when a piece is too big.",
       params: [
         range("size", "Max chunk size (characters)", 50, 2000, 10, 300),
         range("overlap", "Overlap (characters)", 0, 300, 5, 30),
-        { type: "select", key: "preset", label: "Separator preset", value: "generic", options: [["generic", "Generic text  (¶ → line → sentence → word)"], ["markdown", "Markdown  (headings → code → ¶ …)"], ["python", "Python  (class → def → ¶ …)"], ["javascript", "JavaScript  (function → class → const …)"]] },
+        { type: "select", key: "preset", label: "Separators", value: "generic", options: [["generic", "Generic text"], ["markdown", "Markdown"], ["python", "Python code"], ["javascript", "JavaScript code"]] },
       ],
       run: Chunkers.recursive,
       info: {
-        summary: "Tries a <b>prioritised list of separators</b> — paragraphs first, then lines, sentences and words — and only drops to a finer separator when a piece is still too big. Small pieces are then merged back up to the size limit. This is LangChain's <code>RecursiveCharacterTextSplitter</code>; language presets make it a code-aware splitter.",
-        how: ["Split on the coarsest separator present (e.g. blank line).", "Any piece still over the limit is split again with the next separator.", "Merge neighbouring pieces greedily until adding one more would exceed the limit.", "Carry trailing pieces (≤ overlap) into the next chunk."],
-        pros: ["Keeps paragraphs and sentences together when possible", "Works on almost any text", "Language presets keep functions and classes intact"],
-        cons: ["Still size-driven, not meaning-driven", "Separator lists need tuning per format"],
-        best: "The go-to default for general text and source code.",
+        idea: "Think about cutting a layer cake for guests. First you try to separate the layers. If a layer is still too big for a plate, you cut it into slices. Only if a slice is still too big do you cut it smaller. Recursive chunking does the same with text: it first tries to split between paragraphs, then between lines, then sentences, then words — and only makes a smaller cut when it has to.",
+        example: { text: "Dogs are loyal. They love walks.\n\nCats are independent. They nap a lot.", params: { size: 40, overlap: 0, preset: "generic" }, caption: "Max size = 40 characters. The whole text is too long, so it first splits at the blank line between the two paragraphs. Each paragraph fits, so it stops there — no sentence is cut." },
+        steps: ["Try to split at blank lines (between paragraphs).", "If a piece is still too big, split it at line breaks.", "Still too big? Split where sentences end (“. ”).", "Still too big? Split between words. Only as a last resort does it cut inside a word.", "Finally, glue small neighbouring pieces back together as long as they fit the size limit."],
+        settings: [
+          ["Max chunk size", "The biggest a chunk may be, in characters. Pieces are combined up to this size."],
+          ["Overlap", "Roughly how many characters from the end of one chunk are repeated at the start of the next, so ideas near a boundary aren't lost."],
+          ["Separators", "The “natural break points” it tries, in order. For code, pick Python or JavaScript so it splits between functions and classes instead of in the middle of them."],
+        ],
+        good: ["Keeps paragraphs and sentences together whenever possible", "Works well on almost any kind of text", "With a code preset, keeps functions and classes whole"],
+        watch: ["It still decides by size, not by meaning", "Different file formats need different break points"],
+        use: "The best default for most projects. It's the same idea as LangChain's popular <code>RecursiveCharacterTextSplitter</code>.",
       },
     },
     {
-      id: "token", name: "Token-based", sizeKey: "size", unit: "tokens",
+      id: "token", name: "Token-based", unit: "tokens",
+      short: "Measures chunk size in tokens — what embedding models actually count.",
       params: [range("size", "Chunk size (tokens)", 8, 512, 4, 64), range("overlap", "Overlap (tokens)", 0, 128, 1, 8)],
       run: Chunkers.token,
       info: {
-        summary: "Measures size in <b>tokens</b> — what LLMs and embedding models actually count and bill for — instead of characters. Guarantees each chunk fits the embedding model's input window.",
-        how: ["Tokenise the whole document.", "Take N tokens as a chunk.", "Step forward by N − overlap tokens.", "Map token spans back to text."],
-        pros: ["Exact control over model limits and cost", "Consistent across languages with different word lengths"],
-        cons: ["Tokenizer-specific (tiktoken, SentencePiece …)", "Cuts sentences just like fixed-size"],
-        best: "Hard context limits, cost budgeting, multilingual corpora.",
-        note: "This demo uses an approximate GPT-style tokenizer (cl100k-shaped pre-tokenisation with sub-word splitting). Real pipelines should use the embedding model's own tokenizer.",
+        idea: "AI models don't read letters or words — they read <b>tokens</b>. A token is a small piece of text: often a short word like “find”, sometimes part of a longer word (“Chunking” → “Chun” + “king”), or a punctuation mark. Every model can only take in a certain number of tokens, and you usually pay per token. Token-based chunking gives every chunk the same number of tokens, so you always know it will fit.",
+        example: { text: "Chunking helps chatbots find answers quickly.", params: { size: 4, overlap: 0 }, showTokens: true, caption: "Chunk size = 4 tokens. Long words like “Chunking” count as 2 tokens; short words like “find” count as 1. The full stop is a token on its own." },
+        steps: ["Break the whole text into tokens.", "Take the first N tokens as chunk 1.", "Take the next N tokens as chunk 2 (stepping back a little if you set an overlap).", "Repeat until the end."],
+        settings: [
+          ["Chunk size (tokens)", "How many tokens per chunk. Rule of thumb for English: 1 token ≈ 4 characters ≈ ¾ of a word, so 100 tokens is about 75 words."],
+          ["Overlap (tokens)", "How many tokens each chunk repeats from the previous one."],
+        ],
+        good: ["Guarantees every chunk fits the model's limit", "Makes cost easy to predict"],
+        watch: ["Different models split text into tokens differently", "Like fixed-size, it happily cuts sentences in half"],
+        use: "When you must stay under a strict model limit or budget.",
+        note: "Token counts here are a close approximation of OpenAI-style tokenizers. In a real project, count with your embedding model's own tokenizer.",
       },
     },
     {
-      id: "sentence", name: "Sentence", sizeKey: "maxChars",
+      id: "sentence", name: "Sentence",
+      short: "Packs whole sentences into each chunk, so no sentence is ever cut in half.",
       params: [range("maxChars", "Max chunk size (characters)", 80, 2000, 10, 400), range("overlap", "Overlap (sentences)", 0, 3, 1, 1)],
       run: Chunkers.sentence,
       info: {
-        summary: "Splits the text into <b>sentences</b>, then packs whole sentences into each chunk until the size budget is reached. A sentence is never cut in half.",
-        how: ["Detect sentence boundaries (. ! ? followed by a capital, blank lines, list items).", "Add sentences to the current chunk while it stays under the limit.", "Start a new chunk, optionally repeating the last k sentences."],
-        pros: ["Every chunk is grammatical and readable", "Great precision for fact-style questions"],
-        cons: ["Sentence detection is imperfect (abbreviations, code)", "Ignores paragraph/section context"],
-        best: "Articles, FAQs, transcripts, Q&A datasets.",
+        idea: "Here a sentence is a brick that is never broken. The splitter fills a chunk with whole sentences — like packing books into a box — and when the next sentence won't fit, it closes the box and starts a new one.",
+        example: { text: "I love pizza. It is cheesy. Rome is in Italy. It has old ruins.", params: { maxChars: 40, overlap: 0 }, caption: "Max size = 40 characters. The first two sentences fit together (27 characters). Adding “Rome is in Italy.” would go over 40, so it starts chunk 2." },
+        steps: ["Find where each sentence ends (at . ! or ?).", "Add sentences to the current chunk one at a time.", "When the next sentence would go over the limit, start a new chunk.", "Optionally repeat the last sentence(s) at the start of the next chunk."],
+        settings: [
+          ["Max chunk size", "The most characters a chunk may hold. Sentences are added until the next one won't fit."],
+          ["Overlap (sentences)", "How many sentences to repeat from the previous chunk. This helps words like “It” keep their meaning — in the example, “It is cheesy” only makes sense next to “I love pizza.”"],
+        ],
+        good: ["Every chunk reads naturally", "Great for answering specific, factual questions"],
+        watch: ["Abbreviations like “Dr.” or “e.g.” can confuse sentence detection", "It doesn't know about headings or sections"],
+        use: "Articles, FAQs, news and meeting transcripts.",
       },
     },
     {
-      id: "paragraph", name: "Paragraph", sizeKey: "maxChars",
-      params: [range("maxChars", "Max chunk size (characters)", 100, 3000, 10, 600, "Small consecutive paragraphs are merged up to this size.")],
+      id: "paragraph", name: "Paragraph",
+      short: "Uses blank lines as boundaries and merges short paragraphs together.",
+      params: [range("maxChars", "Max chunk size (characters)", 100, 3000, 10, 600)],
       run: Chunkers.paragraph,
       info: {
-        summary: "Uses <b>blank lines</b> as boundaries, treating each paragraph as a unit of thought. Short paragraphs are merged together; long ones stay whole.",
-        how: ["Split on blank lines.", "Merge consecutive paragraphs while under the size limit.", "Oversized paragraphs become their own chunk."],
-        pros: ["Follows the author's own grouping of ideas", "Simple and explainable"],
-        cons: ["Paragraph sizes vary wildly", "Useless for text without blank lines"],
-        best: "Well-edited prose: essays, reports, blog posts.",
+        idea: "Writers already group related ideas into paragraphs, separated by blank lines. This strategy trusts the writer: each paragraph is one unit. Very short paragraphs (like a greeting) are joined with their neighbours, so you don't end up with tiny, useless chunks.",
+        example: { text: "Hi Sam,\n\nThanks for the photos!\n\nThe beach looked amazing and the sunset over the water was beautiful.\n\nSee you soon!", params: { maxChars: 60 }, caption: "Max size = 60 characters. “Hi Sam,” and “Thanks for the photos!” are tiny, so they're joined. The long paragraph is too big to join with anything, so it stands alone." },
+        steps: ["Split the text wherever there's a blank line.", "Join neighbouring paragraphs together while they still fit the limit.", "A paragraph that is already too long becomes its own chunk — it is never cut."],
+        settings: [["Max chunk size", "How big a group of joined paragraphs may get. Raise it to merge more paragraphs into each chunk."]],
+        good: ["Follows the author's own grouping of ideas", "Simple and easy to explain"],
+        watch: ["Paragraph sizes vary a lot, so chunk sizes do too", "Doesn't work on text without blank lines"],
+        use: "Well-written prose: essays, reports, blog posts and emails.",
       },
     },
     {
       id: "sliding", name: "Sliding window",
-      params: [range("window", "Window size (sentences)", 1, 10, 1, 3), range("stride", "Stride (sentences)", 1, 10, 1, 2, "Stride < window ⇒ neighbouring chunks overlap.")],
+      short: "Windows of W sentences that slide forward S sentences at a time.",
+      params: [range("window", "Window size (sentences)", 1, 10, 1, 3), range("stride", "Stride (sentences)", 1, 10, 1, 2)],
       run: Chunkers.sliding,
       info: {
-        summary: "Each chunk is a <b>window of W sentences</b> that slides forward by S sentences. When S &lt; W every sentence appears in several chunks, so context is never lost at a boundary.",
-        how: ["Split into sentences.", "Chunk i = sentences [i·S, i·S + W).", "Continue until the window reaches the end."],
-        pros: ["No idea is stranded at a boundary", "Smooth, highly recallable coverage"],
-        cons: ["Redundant storage and embeddings (see Redundancy)", "Near-duplicate results at query time"],
-        best: "Dense technical or legal text where facts span sentences.",
+        idea: "Picture a magnifying glass that shows 3 sentences at a time. You read what's under it, then slide it down by 2 sentences and read again. Because you only moved 2 but can see 3, one sentence appears in both views. That shared sentence is the overlap, and it means no idea is ever lost at the edge of a chunk.",
+        example: { text: "One. Two. Three. Four. Five.", params: { window: 3, stride: 2 }, caption: "Window = 3 sentences, stride = 2. “Three.” appears in both chunks — that's the overlap." },
+        steps: ["Split the text into sentences.", "Take the first W sentences as chunk 1.", "Move forward by S sentences and take the next W.", "Repeat until the window reaches the end."],
+        settings: [
+          ["Window size", "How many sentences are in each chunk."],
+          ["Stride", "How many sentences the window moves each time. If the stride is smaller than the window, chunks overlap. If they're equal, there's no overlap."],
+        ],
+        good: ["No idea is ever stranded at a boundary", "Search is less likely to miss something"],
+        watch: ["The same text is stored several times, which costs more", "Search can return near-duplicate chunks"],
+        use: "Dense technical or legal text where one fact spans several sentences.",
       },
     },
     {
-      id: "structure", name: "Structure-aware", sizeKey: "maxChars",
+      id: "structure", name: "Structure-aware",
+      short: "Follows the document's headings, lists, code blocks and tables.",
       params: [
-        range("maxChars", "Max chunk size (characters)", 100, 3000, 10, 800, "Sections larger than this are packed block by block."),
-        { type: "check", key: "prependPath", label: "Prepend heading path to each chunk (contextual header)", value: true },
+        range("maxChars", "Max chunk size (characters)", 100, 3000, 10, 800),
+        { type: "check", key: "prependPath", label: "Add heading path to each chunk", value: true },
       ],
       run: Chunkers.structure,
       info: {
-        summary: "Parses the document's <b>layout</b> — Markdown headings, code blocks, tables, lists — and splits along it. Every chunk knows its heading path (e.g. <code>Handbook › Ingestion › Chunking</code>), which can be prepended so the embedding knows where the text came from.",
-        how: ["Parse the document into blocks: heading, paragraph, list, code, table.", "Group blocks into sections by heading.", "Small sections become one chunk; large ones are packed block by block.", "Code and tables are never split; only oversized prose falls back to recursive splitting."],
-        pros: ["Chunks align with how humans organised the content", "Code and tables stay intact", "Rich metadata for filtering and citations"],
-        cons: ["Needs structured input (Markdown, HTML, PDF layout)", "Section sizes can be uneven"],
-        best: "Documentation, wikis, manuals, knowledge bases. Plain text falls back to paragraph packing.",
+        idea: "A well-organised document is like a book with chapters and sections. This strategy reads the headings (like “## Ingredients”) and cuts at section boundaries, so each chunk is one complete section. It also remembers where each chunk came from — for example “Recipe › Ingredients” — and adds that label to the chunk. Now even a chunk that just says “2 eggs” is clearly about a recipe's ingredients.",
+        example: { text: "# Recipe\n## Ingredients\n- 2 eggs\n- 1 cup flour\n## Steps\nMix everything. Bake for 20 minutes.", params: { maxChars: 200, prependPath: true }, caption: "Each heading's section becomes one chunk. The heading path (in colour) is added on top so the chunk keeps its context." },
+        steps: ["Read the document and recognise headings, paragraphs, lists, code blocks and tables.", "Group everything under a heading into one section.", "If a section fits the size limit, it becomes one chunk.", "If it's too big, split it between blocks — but never cut a code block or table in half.", "Attach the heading path to each chunk."],
+        settings: [
+          ["Max chunk size", "The largest a chunk may be. Bigger sections are split between their blocks."],
+          ["Add heading path", "Puts the section titles at the top of each chunk before it's searched. Search works better because every chunk now mentions its topic."],
+        ],
+        good: ["Chunks match how the content is organised", "Code and tables stay in one piece", "Each chunk knows where it came from"],
+        watch: ["Needs structured text (Markdown, HTML). Plain text falls back to paragraphs", "Sections can be very different sizes"],
+        use: "Documentation, wikis, manuals and knowledge bases.",
       },
     },
     {
       id: "semantic", name: "Semantic",
-      params: [
-        range("percentile", "Breakpoint percentile", 50, 99, 1, 80, "Split where the distance between neighbours is in the top (100 − p)%."),
-        range("buffer", "Sentence buffer", 0, 3, 1, 1, "Neighbouring sentences combined with each sentence before comparing."),
-      ],
+      short: "Starts a new chunk wherever the topic shifts between sentences.",
+      params: [range("percentile", "Breakpoint percentile", 50, 99, 1, 80), range("buffer", "Sentence buffer", 0, 3, 1, 1)],
       run: Chunkers.semantic,
       info: {
-        summary: "Embeds every sentence (together with its neighbours) and measures how different each sentence is from the next. Where the distance spikes, the <b>topic has shifted</b> — that's where a new chunk starts.",
-        how: ["Split into sentences and add a buffer of neighbours to each.", "Embed each buffered sentence.", "Compute cosine distance between consecutive sentences.", "Break wherever the distance is above the chosen percentile."],
-        pros: ["Boundaries follow meaning, not formatting", "Each chunk tends to cover one topic"],
-        cons: ["Requires an embedding call per sentence (slow, costly)", "Chunk sizes are unpredictable", "Sensitive to the threshold"],
-        best: "Long, loosely structured text: transcripts, narratives, mixed-topic notes.",
-        note: "This demo uses TF-IDF vectors in the browser as a stand-in for a neural embedding model, so it reacts to shared vocabulary. Try the “Plain prose with topic shifts” sample.",
+        idea: "This strategy reads like a person: it notices when the topic changes. It compares each sentence with the next one. If they talk about similar things (“Cats purr…” → “Cats sleep…”), they stay together. If the subject suddenly changes (“…Cats sleep a lot.” → “Rockets need fuel.”), that's a topic shift, and a new chunk starts there.",
+        example: { text: "Cats purr when happy. Cats sleep a lot. Rockets need fuel. Rockets fly to space.", params: { percentile: 90, buffer: 0 }, caption: "The two sentences about cats are similar, so they stay together. The jump from cats to rockets is a big change, so a new chunk starts there." },
+        steps: ["Split the text into sentences.", "Turn each sentence into a list of numbers that captures its meaning (an “embedding”).", "Measure how different each sentence is from the next one.", "Wherever the difference is unusually large, start a new chunk."],
+        settings: [
+          ["Breakpoint percentile", "How big a change counts as a new topic. At 80, only the biggest 20% of changes become breaks. Higher → fewer, larger chunks. Lower → more, smaller chunks."],
+          ["Sentence buffer", "Compares small groups of sentences instead of single ones, which smooths out noise. With a buffer of 1, each sentence is judged together with the one before and after it."],
+        ],
+        good: ["Chunk boundaries follow meaning, not formatting", "Each chunk tends to cover one topic"],
+        watch: ["Needs an embedding for every sentence, which is slower and costs more", "Chunk sizes are unpredictable", "Results change a lot with the percentile"],
+        use: "Long text with loose structure: transcripts, stories, mixed-topic notes. Open the Breakpoints tab to see where it decided to split.",
+        note: "To run free in your browser, this demo judges similarity by shared words. Real systems use an embedding model, which also understands synonyms (e.g. “car” ≈ “vehicle”).",
       },
     },
   ];
 
+  const TABS = [["map", "Chunk map"], ["chunks", "Chunks"], ["retrieval", "Retrieval test"], ["breakpoints", "Breakpoints"], ["how", "How it works"]];
+
   const byId = Object.fromEntries(STRATEGIES.map((s) => [s.id, s]));
-  const state = { text: "", active: "recursive", params: {}, query: "", topK: 3, result: null };
+  const state = { text: "", sample: "markdown", active: "fixed", tab: "map", page: "home", params: {}, query: "", topK: 3, result: null };
   STRATEGIES.forEach((s) => {
     state.params[s.id] = {};
     s.params.forEach((p) => (state.params[s.id][p.key] = p.value));
@@ -132,9 +180,7 @@
 
   // ---------- running ----------
   function runStrategy(s) {
-    const t0 = performance.now();
     const res = s.run(state.text, state.params[s.id]);
-    res.ms = performance.now() - t0;
     res.chunks.forEach((c) => {
       c.chars = c.text.length;
       c.tokens = Chunkers.countTokens(c.embedText || c.text);
@@ -143,49 +189,37 @@
   }
 
   function statsOf(chunks) {
-    const n = chunks.length;
-    const chars = chunks.map((c) => c.chars);
-    const sum = chars.reduce((a, b) => a + b, 0);
+    const n = chunks.length, chars = chunks.map((c) => c.chars);
     return {
       n,
-      avg: n ? sum / n : 0,
+      avg: n ? chars.reduce((a, b) => a + b, 0) / n : 0,
       min: n ? Math.min(...chars) : 0,
       max: n ? Math.max(...chars) : 0,
       avgTok: n ? chunks.reduce((a, c) => a + c.tokens, 0) / n : 0,
-      redundancy: state.text.trim().length ? (sum / state.text.trim().length) * 100 : 0,
     };
   }
 
-  // ---------- tabs ----------
-  function renderTabs() {
-    const items = STRATEGIES.map((s) => [s.id, s.name]).concat([["compare", "⇄ Compare all"]]);
-    $("#tabs").innerHTML = items
-      .map(([id, name]) => `<button class="tab${id === "compare" ? " compare" : ""}" role="tab" data-id="${id}" aria-selected="${id === state.active}">${name}</button>`)
-      .join("");
+  // ---------- overview ----------
+  $("#strategyCards").innerHTML = STRATEGIES.map(
+    (s, i) => `<a class="s-card" href="#/sim/${s.id}"><span class="num">0${i + 1}</span><h3>${s.name}</h3><p>${s.short}</p><span class="go">Try it →</span></a>`
+  ).join("");
+
+  // ---------- simulator ----------
+  function renderSidebar() {
+    $("#stratList").innerHTML = STRATEGIES.map((s) => `<a href="#/sim/${s.id}" class="${s.id === state.active ? "active" : ""}">${s.name}</a>`).join("");
+    const s = byId[state.active];
+    $("#simTitle").textContent = s.name + " chunking";
+    $("#simDesc").textContent = s.short;
   }
 
-  $("#tabs").addEventListener("click", (e) => {
-    const b = e.target.closest(".tab");
-    if (!b) return;
-    state.active = b.dataset.id;
-    renderAll();
-  });
-
-  // ---------- controls + info ----------
-  function renderControls() {
-    const box = $("#controls");
-    if (state.active === "compare") {
-      box.innerHTML = `<p class="muted small" style="margin:0">Compare mode runs every strategy with its own current parameters. Pick a strategy tab to tune it, then come back here.</p>`;
-      return;
-    }
+  function renderParams() {
     const s = byId[state.active], vals = state.params[s.id];
-    box.innerHTML = s.params
+    $("#params").innerHTML = s.params
       .map((p) => {
         const v = vals[p.key];
         if (p.type === "range")
           return `<div class="ctl"><label for="p-${p.key}">${p.label}<output id="o-${p.key}">${v}</output></label>
-            <input type="range" id="p-${p.key}" data-key="${p.key}" min="${p.min}" max="${p.max}" step="${p.step}" value="${v}" />
-            ${p.hint ? `<div class="hint">${p.hint}</div>` : ""}</div>`;
+            <input type="range" id="p-${p.key}" data-key="${p.key}" min="${p.min}" max="${p.max}" step="${p.step}" value="${v}" /></div>`;
         if (p.type === "select")
           return `<div class="ctl"><label for="p-${p.key}">${p.label}</label><select class="select" id="p-${p.key}" data-key="${p.key}">${p.options
             .map(([k, l]) => `<option value="${k}"${k === v ? " selected" : ""}>${l}</option>`)
@@ -195,77 +229,44 @@
       .join("");
   }
 
-  $("#controls").addEventListener("input", (e) => {
+  $("#params").addEventListener("input", (e) => {
     const el = e.target, key = el.dataset.key;
     if (!key) return;
-    const vals = state.params[state.active];
-    vals[key] = el.type === "checkbox" ? el.checked : el.type === "range" ? Number(el.value) : el.value;
+    state.params[state.active][key] = el.type === "checkbox" ? el.checked : el.type === "range" ? Number(el.value) : el.value;
     const out = document.getElementById("o-" + key);
     if (out) out.textContent = el.value;
-    scheduleRun(30);
+    schedule(renderResults, 30);
   });
 
-  function renderInfo() {
-    const box = $("#info");
-    if (state.active === "compare") {
-      box.innerHTML = `<h2>Why compare?</h2><p>The same document can produce 5 chunks or 50 depending on strategy. Look for:</p>
-        <ul class="small"><li><b>Count &amp; average size</b> — drives storage, embedding cost and how much context each hit carries.</li>
-        <li><b>Size spread</b> (min/max) — wide spreads mean some chunks are noise and some are diluted.</li>
-        <li><b>Boundary placement</b> — do boundaries line up with headings and paragraphs, or land at random?</li></ul>`;
-      return;
-    }
-    const s = byId[state.active], i = s.info;
-    box.innerHTML = `<h2>${s.name} chunking</h2><p>${i.summary}</p>
-      <div class="label">How it works</div><ol class="small">${i.how.map((h) => `<li>${h}</li>`).join("")}</ol>
-      <div class="pc"><div><b>Pros</b><ul>${i.pros.map((x) => `<li>${x}</li>`).join("")}</ul></div>
-      <div><b>Cons</b><ul>${i.cons.map((x) => `<li>${x}</li>`).join("")}</ul></div></div>
-      <div class="best"><b>Best for:</b> ${i.best}</div>
-      ${i.note ? `<p class="muted small">ⓘ ${i.note}</p>` : ""}`;
+  function renderTabs() {
+    const tabs = TABS.filter(([id]) => id !== "breakpoints" || state.active === "semantic");
+    if (!tabs.some(([id]) => id === state.tab)) state.tab = "map";
+    $("#tabs").innerHTML = tabs.map(([id, label]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${id === state.tab}">${label}</button>`).join("");
+    $$(".tab-panel").forEach((p) => (p.hidden = p.dataset.panel !== state.tab));
   }
 
-  // ---------- single-strategy results ----------
+  $("#tabs").addEventListener("click", (e) => {
+    const b = e.target.closest(".tab");
+    if (!b) return;
+    state.tab = b.dataset.tab;
+    renderTabs();
+  });
+
   function renderStats(res) {
     const st = statsOf(res.chunks);
+    const tok = byId[state.active].unit === "tokens";
     const cells = [
       [st.n, "chunks"],
-      [fmt(st.avg), "avg chars"],
-      [fmt(st.avgTok), "avg tokens"],
-      [`${st.min}–${st.max}`, "min–max chars"],
-      [fmt(st.redundancy) + "%", "redundancy", "Total chunk text ÷ document length. Above 100% means overlap duplicates content."],
-      [res.ms < 1 ? "<1 ms" : fmt(res.ms) + " ms", "run time"],
+      tok ? [fmt(st.avgTok), "avg tokens"] : [fmt(st.avg), "avg characters"],
+      tok ? [fmt(st.avg), "avg characters"] : [fmt(st.avgTok), "avg tokens"],
+      [`${st.min}–${st.max}`, "smallest–largest"],
     ];
-    $("#stats").innerHTML = cells.map(([v, k, t]) => `<div class="stat"${t ? ` title="${t}"` : ""}><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
-
-    const s = byId[state.active];
-    const useTok = s.unit === "tokens";
-    const vals = res.chunks.map((c) => (useTok ? c.tokens : c.chars));
-    const target = s.sizeKey ? state.params[s.id][s.sizeKey] : null;
-    const top = Math.max(1, ...vals, target || 0);
-    $("#sizeLegend").textContent = `${useTok ? "tokens" : "characters"} per chunk${target ? ` · dashed line = limit (${target})` : ""}`;
-    $("#sizechart").innerHTML =
-      res.chunks.map((c, i) => `<div class="bar" data-c="${c.id}" title="#${c.id + 1}: ${vals[i]} ${useTok ? "tokens" : "chars"}" style="height:${(vals[i] / top) * 100}%;background:${solid(c.id)}"></div>`).join("") +
-      (target ? `<div class="target" style="bottom:${(target / top) * 100}%"><span>limit</span></div>` : "");
+    $("#stats").innerHTML = cells.map(([v, k]) => `<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
   }
 
-  function renderSemantic(res) {
-    const card = $("#semanticCard");
-    const ex = res.extra;
-    if (state.active !== "semantic" || !ex.distances || !ex.distances.length) { card.hidden = true; return; }
-    card.hidden = false;
-    const d = ex.distances, W = 1000, H = 130, pad = 4;
-    const bw = W / d.length;
-    const y = (v) => H - pad - v * (H - 2 * pad);
-    const brk = new Set(ex.breaks);
-    const bars = d
-      .map((v, i) => `<rect class="b${brk.has(i) ? " brk" : ""}" x="${i * bw + bw * 0.15}" y="${y(v)}" width="${Math.max(1, bw * 0.7)}" height="${H - pad - y(v)}"><title>Between sentence ${i + 1} and ${i + 2}: distance ${v.toFixed(3)}${brk.has(i) ? " → break" : ""}</title></rect>`)
-      .join("");
-    $("#semChart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Distance between consecutive sentences">${bars}<line class="thr" x1="0" x2="${W}" y1="${y(ex.threshold)}" y2="${y(ex.threshold)}" vector-effect="non-scaling-stroke"/></svg>`;
-    $("#semLegend").textContent = `threshold ${ex.threshold.toFixed(3)} · ${ex.breaks.length} breakpoints · highlighted bars = new chunk`;
-  }
-
-  function renderDoc(res, hitIds) {
+  function renderMap(res) {
     const text = state.text, chunks = res.chunks;
-    if (!text.trim()) { $("#doc").innerHTML = `<div class="empty">Paste or load a document to begin.</div>`; return; }
+    if (!text.trim()) { $("#docMap").innerHTML = `<div class="empty">The document is empty. Use “Edit text” to add some.</div>`; return; }
     const pts = new Set([0, text.length]);
     chunks.forEach((c) => { pts.add(c.start); pts.add(c.end); });
     const cuts = [...pts].sort((a, b) => a - b);
@@ -286,57 +287,104 @@
       const bg = ids.length === 1
         ? tint(ids[0])
         : `repeating-linear-gradient(135deg, ${ids.map((id, j) => `${tint(id, 0.45)} ${j * 5}px ${(j + 1) * 5}px`).join(", ")})`;
-      const hit = ids.some((id) => hitIds.has(id)) ? " hit" : "";
-      html.push(`<span class="seg${hit}" data-c="${ids.join(" ")}" style="background:${bg}">${piece}</span>`);
+      const title = ids.map((id) => `Chunk ${id + 1} · ${chunks[id].chars} chars`).join("\n");
+      html.push(`<span class="seg" data-c="${ids.join(" ")}" title="${title}" style="background:${bg}">${piece}</span>`);
     }
-    $("#doc").innerHTML = html.join("");
+    $("#docMap").innerHTML = html.join("");
   }
 
-  function renderChunks(res, hitRank) {
-    if (!res.chunks.length) { $("#chunks").innerHTML = `<div class="empty">No chunks.</div>`; return; }
-    $("#chunks").innerHTML = res.chunks
-      .map((c) => {
-        const m = c.meta, badges = [];
-        if (hitRank.has(c.id)) badges.push(`<span class="badge hitb">match #${hitRank.get(c.id)}</span>`);
-        if (m.types) badges.push(...m.types.map((t) => `<span class="badge">${t}</span>`));
-        if (m.sentences !== undefined) badges.push(`<span class="badge">sent ${m.sentences}</span>`);
-        if (m.paragraphs !== undefined) badges.push(`<span class="badge">${m.paragraphs} ¶</span>`);
-        if (m.tokenRange) badges.push(`<span class="badge">tok ${m.tokenRange}</span>`);
-        if (m.oversized) badges.push(`<span class="badge warn" title="Couldn't be split without breaking a unit">over limit</span>`);
-        const ctx = c.context ? `<div class="ctx">↳ ${esc(c.context)}</div>` : m.path && m.path.length ? `<div class="ctx muted">${esc(m.path.join(" › "))}</div>` : "";
-        return `<div class="chunk${hitRank.has(c.id) ? " is-hit" : ""}" data-c="${c.id}" style="--c:${solid(c.id)}">
-          <div class="ch"><b>#${c.id + 1}</b><span class="muted">${c.chars} chars · ${c.tokens} tok</span>${badges.join("")}</div>
-          ${ctx}<pre>${esc(c.text)}</pre></div>`;
-      })
-      .join("");
+  function chunkCard(c, extra) {
+    const ctx = c.context ? `<div class="ctx">${esc(c.context)}</div>` : "";
+    return `<div class="chunk" style="--c:${solid(c.id)}"><div class="ch">${extra || ""}<b>Chunk ${c.id + 1}</b><span>${c.chars} chars · ${c.tokens} tokens</span></div>${ctx}<pre>${esc(c.text)}</pre></div>`;
+  }
+
+  function renderChunkList(res) {
+    $("#chunkCount").textContent = `${res.chunks.length} chunks`;
+    $("#chunkList").innerHTML = res.chunks.length ? res.chunks.map((c) => chunkCard(c)).join("") : `<div class="empty">No chunks.</div>`;
   }
 
   function renderHits(res) {
     const box = $("#hits");
-    const hits = state.query.trim() ? Chunkers.bm25(res.chunks, state.query).slice(0, state.topK) : [];
-    if (!state.query.trim()) box.innerHTML = `<div class="empty">Type a question to see which chunks a keyword retriever would return — then change the strategy and watch the answer context change.</div>`;
-    else if (!hits.length) box.innerHTML = `<div class="empty">No chunk shares a keyword with that query.</div>`;
-    else
-      box.innerHTML = hits
-        .map((h, i) => {
-          const c = res.chunks[h.id];
-          return `<div class="hit" data-c="${c.id}"><span class="rank">#${i + 1}</span><span class="snip">Chunk ${c.id + 1}: ${esc(c.text.replace(/\s+/g, " ").slice(0, 140))}</span><span class="score">${h.score.toFixed(2)}</span></div>`;
-        })
-        .join("");
-    return hits;
+    if (!state.query.trim()) { box.innerHTML = ""; return; }
+    const hits = Chunkers.bm25(res.chunks, state.query).slice(0, state.topK);
+    box.innerHTML = hits.length
+      ? hits.map((h, i) => chunkCard(res.chunks[h.id], `<span class="rank">#${i + 1}</span>`).replace("</span></div>", ` · score ${h.score.toFixed(2)}</span></div>`)).join("")
+      : `<div class="empty">No chunk shares a keyword with that question.</div>`;
   }
 
-  function renderSingle() {
+  function renderBreakpoints(res) {
+    const ex = res.extra;
+    if (state.active !== "semantic") return;
+    if (!ex.distances || !ex.distances.length) { $("#semChart").innerHTML = `<div class="empty">Need at least two sentences.</div>`; $("#semLegend").textContent = ""; return; }
+    const d = ex.distances, W = 1000, H = 180, pad = 4, bw = W / d.length;
+    const y = (v) => H - pad - v * (H - 2 * pad);
+    const brk = new Set(ex.breaks);
+    const bars = d
+      .map((v, i) => `<rect class="b${brk.has(i) ? " brk" : ""}" x="${i * bw + bw * 0.15}" y="${y(v)}" width="${Math.max(1, bw * 0.7)}" height="${H - pad - y(v)}"><title>Sentence ${i + 1} → ${i + 2}: ${v.toFixed(3)}${brk.has(i) ? " (new chunk)" : ""}</title></rect>`)
+      .join("");
+    $("#semChart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Distance between consecutive sentences">${bars}<line class="thr" x1="0" x2="${W}" y1="${y(ex.threshold)}" y2="${y(ex.threshold)}" vector-effect="non-scaling-stroke"/></svg>`;
+    $("#semLegend").textContent = `Each bar is the distance between two neighbouring sentences. Bars above the dashed threshold (${ex.threshold.toFixed(2)}) start a new chunk — ${ex.breaks.length} breakpoints.`;
+  }
+
+  function renderExample(s) {
+    const ex = s.info.example;
+    const chunks = s.run(ex.text, ex.params).chunks;
+    const tokens = ex.showTokens
+      ? `<div class="ex-label">Split into tokens</div><div class="ex-tokens">${Chunkers.tokenize(ex.text)
+          .map((t) => `<span>${esc(ex.text.slice(t.start, t.end)).replace(/ /g, "␣")}</span>`)
+          .join("")}</div>`
+      : "";
+    const out = chunks
+      .map((c) => `<div class="ex-chunk" style="--c:${solid(c.id)};background:${tint(c.id)}"><span class="ex-num">Chunk ${c.id + 1}</span>${c.context ? `<span class="ex-ctx">${esc(c.context)}</span>` : ""}<span class="ex-text">${esc(c.text)}</span></div>`)
+      .join("");
+    return `<div class="example">
+      <div class="ex-label">Input text</div><div class="ex-input">${esc(ex.text)}</div>
+      ${tokens}
+      <div class="ex-label">Result</div><div class="ex-out">${out}</div>
+      <p class="ex-caption">${ex.caption}</p></div>`;
+  }
+
+  function renderHow() {
+    const s = byId[state.active], i = s.info;
+    const list = (xs) => `<ul>${xs.map((x) => `<li>${x}</li>`).join("")}</ul>`;
+    $("#howTo").innerHTML = `<div class="how">
+      <h3>The idea</h3><p class="lead">${i.idea}</p>
+      <h3>Example</h3>${renderExample(s)}
+      <h3>Step by step</h3><ol>${i.steps.map((x) => `<li>${x}</li>`).join("")}</ol>
+      <h3>The settings</h3><dl class="settings">${i.settings.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+      <div class="pc"><div><h3>Good at</h3>${list(i.good)}</div><div><h3>Watch out for</h3>${list(i.watch)}</div></div>
+      <h3>Use it for</h3><p>${i.use}</p>
+      ${i.note ? `<div class="note">${i.note}</div>` : ""}</div>`;
+  }
+
+  function renderResults() {
+    if (state.page === "compare") return renderCompare();
+    if (state.page !== "sim") return;
     const res = runStrategy(byId[state.active]);
     state.result = res;
-    const hits = renderHits(res);
-    const hitIds = new Set(hits.map((h) => h.id));
-    const hitRank = new Map(hits.map((h, i) => [h.id, i + 1]));
     renderStats(res);
-    renderSemantic(res);
-    renderDoc(res, hitIds);
-    renderChunks(res, hitRank);
+    renderMap(res);
+    renderChunkList(res);
+    renderHits(res);
+    renderBreakpoints(res);
   }
+
+  function renderSim() {
+    renderSidebar();
+    renderParams();
+    renderTabs();
+    renderHow();
+    renderResults();
+  }
+
+  // clicking a chunk in the map outlines all of its pieces (useful for overlaps)
+  $("#docMap").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-c]");
+    $$("#docMap .focus").forEach((x) => x.classList.remove("focus"));
+    if (!el) return;
+    const id = el.dataset.c.split(" ").pop();
+    $$(`#docMap [data-c~="${id}"]`).forEach((x) => x.classList.add("focus"));
+  });
 
   // ---------- compare ----------
   function renderCompare() {
@@ -344,119 +392,68 @@
     const rows = STRATEGIES.map((s) => {
       const res = runStrategy(s), st = statsOf(res.chunks);
       const bars = res.chunks
-        .map((c) => `<i title="${s.name} #${c.id + 1}: ${c.chars} chars" style="left:${(c.start / L) * 100}%;width:${Math.max(0.15, ((c.end - c.start) / L) * 100)}%;top:${c.id % 2 ? 50 : 0}%;background:${solid(c.id)}"></i>`)
+        .map((c) => `<i title="Chunk ${c.id + 1}: ${c.chars} chars" style="left:${(c.start / L) * 100}%;width:${Math.max(0.15, ((c.end - c.start) / L) * 100)}%;top:${c.id % 2 ? 50 : 0}%;background:${solid(c.id)}"></i>`)
         .join("");
-      return `<span class="name" data-id="${s.id}">${s.name}</span><span class="num">${st.n}</span><span class="num">${fmt(st.avg)}</span><span class="num">${st.min}–${st.max}</span><div class="lane">${bars}</div>`;
+      return `<tr><td class="name"><a href="#/sim/${s.id}">${s.name}</a></td><td class="num">${st.n}</td><td class="num">${fmt(st.avg)}</td><td class="num range">${st.min}–${st.max}</td><td class="lane-cell"><div class="lane">${bars}</div></td></tr>`;
     });
-    $("#compare").innerHTML = `<div class="cmp"><span class="h">Strategy</span><span class="h num">Chunks</span><span class="h num">Avg</span><span class="h num">Range</span><span class="h lane-h">Boundaries across the document →</span>${rows.join("")}</div>`;
+    $("#compare").innerHTML = `<table class="cmp"><thead><tr><th>Strategy</th><th class="num">Chunks</th><th class="num">Avg chars</th><th class="num range">Range</th><th>Position in document</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
   }
 
-  $("#compare").addEventListener("click", (e) => {
-    const n = e.target.closest(".name");
-    if (n) { state.active = n.dataset.id; renderAll(); }
+  // ---------- document ----------
+  const docOptions = Object.entries(SAMPLES).map(([k, s]) => `<option value="${k}">${s.label}</option>`).join("") + `<option value="custom">Your own text</option>`;
+  $$(".doc-select").forEach((sel) => {
+    sel.innerHTML = docOptions;
+    sel.addEventListener("change", () => {
+      if (sel.value === "custom") { openEditor(); syncDocSelects(); return; }
+      loadSample(sel.value);
+    });
   });
 
-  // ---------- orchestration ----------
-  function renderResults() {
-    const compare = state.active === "compare";
-    $("#singleView").hidden = compare;
-    $("#compareView").hidden = !compare;
-    if (compare) renderCompare();
-    else renderSingle();
+  function syncDocSelects() { $$(".doc-select").forEach((s) => (s.value = state.sample)); }
+
+  function setText(t, sample) {
+    state.text = t.replace(/\r\n?/g, "\n");
+    state.sample = sample;
+    syncDocSelects();
   }
 
-  function renderAll() {
-    renderTabs();
-    renderControls();
-    renderInfo();
+  function loadSample(key) {
+    setText(SAMPLES[key].text, key);
+    if (key === "code" && state.params.recursive.preset === "generic") state.params.recursive.preset = "python";
+    if (state.page === "sim") renderParams();
     renderResults();
   }
 
-  let timer = null;
-  function scheduleRun(ms) {
-    clearTimeout(timer);
-    timer = setTimeout(renderResults, ms);
-  }
-
-  function setText(t) {
-    state.text = t.replace(/\r\n?/g, "\n");
+  const dialog = $("#docDialog");
+  function openEditor() {
+    $("#input").value = state.text;
     updateDocMeta();
+    dialog.showModal();
   }
-
   function updateDocMeta() {
-    const t = state.text;
-    const words = (t.match(/\S+/g) || []).length;
-    $("#docMeta").textContent = `${t.length.toLocaleString()} characters · ${words.toLocaleString()} words · ~${Chunkers.countTokens(t).toLocaleString()} tokens`;
+    const t = $("#input").value;
+    $("#docMeta").textContent = `${t.length.toLocaleString()} characters · ~${Chunkers.countTokens(t).toLocaleString()} tokens`;
   }
-
-  // ---------- linking hover between map, cards, bars, hits ----------
-  function focusChunk(id, on) {
-    document.querySelectorAll(`[data-c~="${id}"]`).forEach((el) => el.classList.toggle("focus", on));
-  }
-  let focused = null;
-  function setFocus(id) {
-    if (focused === id) return;
-    if (focused !== null) focusChunk(focused, false);
-    focused = id;
-    if (id !== null) focusChunk(id, true);
-  }
-  ["#doc", "#chunks", "#sizechart", "#hits"].forEach((sel) => {
-    const root = $(sel);
-    root.addEventListener("mouseover", (e) => {
-      const el = e.target.closest("[data-c]");
-      setFocus(el ? el.dataset.c.split(" ")[0] : null);
-    });
-    root.addEventListener("mouseleave", () => setFocus(null));
+  $$(".edit-doc").forEach((b) => b.addEventListener("click", openEditor));
+  $("#input").addEventListener("input", () => schedule(updateDocMeta, 150));
+  dialog.addEventListener("close", () => {
+    if (dialog.returnValue !== "apply") return;
+    const t = $("#input").value;
+    if (t === state.text) return;
+    setText(t, "custom");
+    renderResults();
   });
-  // click a card / bar / hit → scroll the map to that chunk (and vice versa)
-  ["#chunks", "#sizechart", "#hits"].forEach((sel) =>
-    $(sel).addEventListener("click", (e) => {
-      const el = e.target.closest("[data-c]");
-      if (!el) return;
-      const seg = $(`#doc [data-c~="${el.dataset.c}"]`);
-      if (seg) { const doc = $("#doc"); doc.scrollTo({ top: seg.offsetTop - doc.offsetTop - 40, behavior: "smooth" }); }
-    })
-  );
-  $("#doc").addEventListener("click", (e) => {
-    const el = e.target.closest("[data-c]");
-    if (!el) return;
-    const card = $(`#chunks .chunk[data-c="${el.dataset.c.split(" ")[0]}"]`);
-    if (card) { const box = $("#chunks"); box.scrollTo({ top: card.offsetTop - box.offsetTop - 8, behavior: "smooth" }); }
-  });
-
-  // ---------- inputs ----------
-  const sampleSel = $("#sample");
-  sampleSel.innerHTML = Object.entries(SAMPLES).map(([k, s]) => `<option value="${k}">${s.label}</option>`).join("") + `<option value="custom" hidden>Your text</option>`;
-  sampleSel.addEventListener("change", () => {
-    const s = SAMPLES[sampleSel.value];
-    if (!s) return;
-    $("#input").value = s.text;
-    setText(s.text);
-    if (sampleSel.value === "code" && state.params.recursive.preset === "generic") state.params.recursive.preset = "python";
-    renderAll();
-  });
-
-  $("#input").addEventListener("input", (e) => {
-    setText(e.target.value);
-    sampleSel.value = "custom";
-    scheduleRun(200);
-  });
-
   $("#file").addEventListener("change", (e) => {
     const f = e.target.files[0];
-    if (!f) return;
-    if (f.size > 2_000_000) { alert("Please choose a file under 2 MB — this runs in your browser."); return; }
-    f.text().then((t) => {
-      $("#input").value = t;
-      setText(t);
-      sampleSel.value = "custom";
-      renderAll();
-    });
     e.target.value = "";
+    if (!f) return;
+    if (f.size > 2_000_000) { alert("Please choose a file under 2 MB — everything runs in your browser."); return; }
+    f.text().then((t) => { $("#input").value = t; updateDocMeta(); });
   });
 
-  $("#query").addEventListener("input", (e) => { state.query = e.target.value; scheduleRun(120); });
-  $("#topk").addEventListener("change", (e) => { state.topK = Number(e.target.value); renderResults(); });
+  // ---------- misc controls ----------
+  $("#query").addEventListener("input", (e) => { state.query = e.target.value; schedule(() => state.result && renderHits(state.result), 120); });
+  $("#topk").addEventListener("change", (e) => { state.topK = Number(e.target.value); state.result && renderHits(state.result); });
 
   $("#download").addEventListener("click", () => {
     const res = state.result;
@@ -480,8 +477,26 @@
     try { localStorage.setItem("chunklab-theme", root.dataset.theme); } catch (e) {}
   });
 
-  // ---------- boot ----------
-  $("#input").value = SAMPLES.markdown.text;
-  setText(SAMPLES.markdown.text);
-  renderAll();
+  const timers = new Map();
+  function schedule(fn, ms) {
+    clearTimeout(timers.get(fn));
+    timers.set(fn, setTimeout(fn, ms));
+  }
+
+  // ---------- router ----------
+  function route() {
+    const [page, id] = location.hash.replace(/^#\/?/, "").split("/");
+    state.page = page === "sim" || page === "compare" ? page : "home";
+    if (state.page === "sim") state.active = byId[id] ? id : "fixed";
+    $$(".page").forEach((p) => (p.hidden = p.id !== "page-" + state.page));
+    $$(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === state.page));
+    $('.nav a[data-route="sim"]').href = `#/sim/${state.active}`;
+    if (state.page === "sim") renderSim();
+    if (state.page === "compare") renderCompare();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", route);
+
+  setText(SAMPLES.markdown.text, "markdown");
+  route();
 })();

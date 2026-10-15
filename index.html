@@ -13,127 +13,121 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
+    <a class="brand" href="#/">
       <span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span>Chunk Lab</span>
-      <small>RAG chunking simulator</small>
-    </div>
+      Chunk Lab
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="#/" data-route="home">Overview</a>
+      <a href="#/sim/fixed" data-route="sim">Simulator</a>
+      <a href="#/compare" data-route="compare">Compare</a>
+    </nav>
     <button id="themeBtn" class="icon-btn" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
   </header>
 
-  <main class="wrap">
-    <section class="intro">
-      <h1>See how your documents get chunked before they get embedded</h1>
-      <p>Paste text or load a sample, pick a strategy, tune the knobs, and watch chunk boundaries, overlaps and retrieval results update live. Everything runs in your browser — nothing is uploaded.</p>
+  <!-- ============ OVERVIEW ============ -->
+  <main id="page-home" class="page">
+    <section class="hero">
+      <h1>See how RAG chunking really works</h1>
+      <p>Pick a strategy, tune its settings and watch a document split into chunks — live, in your browser.</p>
+      <a class="btn primary" href="#/sim/fixed">Open simulator →</a>
     </section>
+    <section class="strategy-grid" id="strategyCards"></section>
+  </main>
 
-    <nav class="tabs" id="tabs" aria-label="Chunking strategies"></nav>
+  <!-- ============ SIMULATOR ============ -->
+  <main id="page-sim" class="page sim" hidden>
+    <aside class="sidebar">
+      <div class="side-label">Strategy</div>
+      <nav class="strat-list" id="stratList" aria-label="Strategies"></nav>
+    </aside>
 
-    <div class="grid">
-      <aside class="col">
-        <div class="card">
-          <div class="card-h">
-            <h2>Document</h2>
-            <label class="btn ghost small">Upload file<input id="file" type="file" accept=".txt,.md,.markdown,.py,.js,.ts,.json,.csv,.html,.xml,.rst" hidden /></label>
-          </div>
-          <select id="sample" class="select" aria-label="Sample document"></select>
-          <textarea id="input" spellcheck="false" aria-label="Document text"></textarea>
-          <div class="muted small" id="docMeta"></div>
+    <section class="workspace">
+      <header class="ws-head">
+        <h1 id="simTitle"></h1>
+        <p id="simDesc"></p>
+      </header>
+
+      <div class="panel setup">
+        <div class="doc-row">
+          <span class="field-label">Document</span>
+          <select class="select doc-select" aria-label="Document"></select>
+          <button class="btn edit-doc">Edit text</button>
         </div>
-
-        <div class="card">
-          <h2>Parameters</h2>
-          <div id="controls" class="controls"></div>
-        </div>
-
-        <div class="card info" id="info"></div>
-      </aside>
-
-      <section class="col">
-        <div id="singleView">
-          <div class="card">
-            <div class="stats" id="stats"></div>
-            <div class="sizechart-wrap">
-              <div class="row-between"><span class="label">Chunk sizes, in order</span><span class="muted small" id="sizeLegend"></span></div>
-              <div class="sizechart" id="sizechart"></div>
-            </div>
-          </div>
-
-          <div class="card" id="semanticCard" hidden>
-            <div class="row-between"><h2>Semantic distance between consecutive sentences</h2><span class="muted small" id="semLegend"></span></div>
-            <div id="semChart"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-h">
-              <h2>Retrieval test <span class="muted small">(BM25 over the chunks)</span></h2>
-            </div>
-            <div class="query-row">
-              <input id="query" type="search" placeholder="Ask something, e.g. “how should code blocks be handled?”" />
-              <select id="topk" class="select narrow" aria-label="Top k">
-                <option value="1">top 1</option><option value="3" selected>top 3</option><option value="5">top 5</option>
-              </select>
-            </div>
-            <div id="hits" class="hits"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-h">
-              <h2>Chunk map</h2>
-              <span class="muted small">Hover a chunk to link it with its card. <span class="ov-key"></span> = overlap</span>
-            </div>
-            <div class="doc" id="doc"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-h">
-              <h2>Chunks</h2>
-              <button id="download" class="btn ghost small">Download JSON</button>
-            </div>
-            <div class="chunks" id="chunks"></div>
-          </div>
-        </div>
-
-        <div id="compareView" hidden>
-          <div class="card">
-            <h2>All strategies on the same document</h2>
-            <p class="muted small">Each strategy uses its current parameters. Bars show where each chunk sits in the document; chunks alternate between two lanes so overlaps are visible.</p>
-            <div id="compare"></div>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <section class="card learn">
-      <h2>Choosing a strategy</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Strategy</th><th>Unit of size</th><th>Respects meaning?</th><th>Good default for</th></tr></thead>
-          <tbody>
-            <tr><td>Fixed-size</td><td>Characters</td><td>No</td><td>Baselines, logs, uniform data</td></tr>
-            <tr><td>Recursive</td><td>Characters</td><td>Partly (separators)</td><td>Most general text; code with language presets</td></tr>
-            <tr><td>Token-based</td><td>Tokens</td><td>No</td><td>Hard model context limits, cost control</td></tr>
-            <tr><td>Sentence</td><td>Sentences</td><td>Yes, sentence level</td><td>Q&amp;A over articles, FAQs</td></tr>
-            <tr><td>Paragraph</td><td>Paragraphs</td><td>Yes, paragraph level</td><td>Well-written prose, essays, reports</td></tr>
-            <tr><td>Sliding window</td><td>Sentences</td><td>Yes, with redundancy</td><td>Dense facts that span sentences</td></tr>
-            <tr><td>Structure-aware</td><td>Sections / blocks</td><td>Yes, document layout</td><td>Docs, wikis, Markdown/HTML, manuals</td></tr>
-            <tr><td>Semantic</td><td>Topic shifts</td><td>Yes, meaning</td><td>Long, loosely structured text</td></tr>
-          </tbody>
-        </table>
+        <div class="params" id="params"></div>
       </div>
-      <h3>Beyond this simulator</h3>
-      <ul>
-        <li><b>Agentic / LLM-based chunking</b> — an LLM decides where to split, or rewrites text into standalone “propositions”.</li>
-        <li><b>Parent-document retrieval</b> — search small chunks, but send their larger parent section to the LLM.</li>
-        <li><b>Late chunking</b> — embed the whole document with a long-context model first, then pool token embeddings per chunk so each keeps global context.</li>
-        <li><b>Contextual retrieval</b> — prepend an LLM-written summary of where the chunk sits in the document (like the heading path option in Structure-aware).</li>
-      </ul>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="tabs" role="tablist" id="tabs"></div>
+
+      <div class="panel tab-panel" data-panel="map">
+        <div class="doc-map" id="docMap"></div>
+        <p class="hint">Each colour is one chunk. <span class="ov-key"></span> striped text belongs to two chunks (overlap). Faded text isn't in any chunk.</p>
+      </div>
+
+      <div class="panel tab-panel" data-panel="chunks" hidden>
+        <div class="panel-head">
+          <span class="muted" id="chunkCount"></span>
+          <button id="download" class="btn small">Download JSON</button>
+        </div>
+        <div class="chunk-list" id="chunkList"></div>
+      </div>
+
+      <div class="panel tab-panel" data-panel="retrieval" hidden>
+        <p class="hint top">Ask a question. The simulator ranks chunks with BM25 keyword search — switch strategies to see how the retrieved context changes.</p>
+        <div class="query-row">
+          <input id="query" type="search" placeholder="e.g. how should code blocks be handled?" />
+          <select id="topk" class="select narrow" aria-label="Number of results">
+            <option value="1">Top 1</option><option value="3" selected>Top 3</option><option value="5">Top 5</option>
+          </select>
+        </div>
+        <div id="hits"></div>
+      </div>
+
+      <div class="panel tab-panel" data-panel="breakpoints" hidden>
+        <p class="hint top" id="semLegend"></p>
+        <div id="semChart"></div>
+      </div>
+
+      <div class="panel tab-panel" data-panel="how" hidden>
+        <div id="howTo"></div>
+      </div>
     </section>
   </main>
 
-  <footer class="footer muted small">
-    Chunk Lab · open source, runs entirely client-side · token counts are a GPT-style approximation · semantic chunking uses TF-IDF vectors as a stand-in for neural embeddings
-  </footer>
+  <!-- ============ COMPARE ============ -->
+  <main id="page-compare" class="page narrow-page" hidden>
+    <header class="ws-head">
+      <h1>Compare strategies</h1>
+      <p>Same document, every strategy. Each bar is a chunk, laid out across the document.</p>
+    </header>
+    <div class="panel setup">
+      <div class="doc-row">
+        <span class="field-label">Document</span>
+        <select class="select doc-select" aria-label="Document"></select>
+        <button class="btn edit-doc">Edit text</button>
+      </div>
+    </div>
+    <div class="panel" id="compare"></div>
+  </main>
+
+  <!-- ============ DOCUMENT EDITOR ============ -->
+  <dialog id="docDialog">
+    <form method="dialog" class="dialog">
+      <div class="dialog-head">
+        <h2>Document text</h2>
+        <label class="btn small">Upload file<input id="file" type="file" accept=".txt,.md,.markdown,.py,.js,.ts,.json,.csv,.html,.xml,.rst" hidden /></label>
+      </div>
+      <textarea id="input" spellcheck="false" aria-label="Document text"></textarea>
+      <div class="dialog-foot">
+        <span class="muted small" id="docMeta"></span>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn">Cancel</button>
+        <button value="apply" class="btn primary" id="applyDoc">Apply</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="chunkers.js"></script>
   <script src="samples.js"></script>

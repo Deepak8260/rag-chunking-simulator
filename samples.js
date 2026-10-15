@@ -1,7 +1,7 @@
 /* Sample documents for Chunk Lab. Each one shows off different strategies. */
 window.SAMPLES = {
   markdown: {
-    label: "Markdown handbook (headings, lists, code, table)",
+    label: "Markdown handbook",
     text: `# Retrieval-Augmented Generation Handbook
 
 ## What is RAG?
@@ -57,7 +57,7 @@ Measure retrieval quality with recall@k and mean reciprocal rank on a labelled s
 `,
   },
   prose: {
-    label: "Plain prose with topic shifts (try Semantic)",
+    label: "Plain prose (4 topics)",
     text: `Coffee was first cultivated in the highlands of Ethiopia and later in Yemen, where Sufi monks drank it to stay awake during night prayers. By the sixteenth century coffee houses had spread across Cairo, Istanbul and Damascus. These coffee houses became lively centres of conversation, music and chess. European traders brought the beans to Venice and London, and coffee quickly rivalled tea and beer as a daily drink. Today coffee is grown in more than fifty countries along the tropical belt, with Brazil producing the largest harvest.
 
 Volcanoes form where molten rock, called magma, rises through the Earth's crust. Most volcanoes sit along the boundaries of tectonic plates, especially around the Pacific Ring of Fire. When pressure from dissolved gases builds up, the magma can erupt explosively and hurl ash high into the atmosphere. Other volcanoes, like those in Hawaii, produce gentle lava flows that slowly build broad shield-shaped mountains. Volcanic ash enriches the soil, which is why farms often thrive on the slopes of dormant volcanoes.
@@ -67,7 +67,7 @@ Honeybees live in colonies of tens of thousands of workers, a few hundred drones
 Modern spacecraft rely on ion thrusters for long missions because they use fuel very efficiently. An ion thruster accelerates charged xenon atoms through an electric field and expels them at enormous speed. The thrust is tiny, about the weight of a sheet of paper, yet it never stops pushing for months or years. Missions such as Dawn used ion propulsion to orbit two different bodies in the asteroid belt. Engineers expect future crewed missions to Mars to combine chemical rockets with electric propulsion.`,
   },
   code: {
-    label: "Python source code (try Recursive → Python)",
+    label: "Python code",
     text: `"""Tiny vector store used in the RAG workshop."""
 import math
 from dataclasses import dataclass, field

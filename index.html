@@ -127,7 +127,7 @@
     <header class="ws-head">
       <span class="kicker neutral">Side by side</span>
       <h1>Compare strategies</h1>
-      <p>Same document, every strategy. Each block is one chunk, placed where it sits in the document.</p>
+      <p>All eight strategies cut the same document. See at a glance how many pieces each one makes, how big they are, and where it cuts.</p>
     </header>
     <div class="panel setup">
       <div class="doc-row">
@@ -136,7 +136,18 @@
         <button class="btn edit-doc">Edit text</button>
       </div>
     </div>
-    <div class="panel" id="compare"></div>
+    <div class="insights" id="insights"></div>
+    <div class="panel">
+      <div class="legend">
+        <p><b>How to read the bars:</b> each bar is the whole document, from the first word on the left to the last word on the right. Every numbered block is one chunk — wider blocks hold more text.</p>
+        <div class="legend-keys">
+          <span><i class="k-chunk"></i>One chunk</span>
+          <span><i class="k-overlap"></i>Overlap — text repeated in two chunks</span>
+          <span><i class="k-gap"></i>Gap — blank space left out of every chunk</span>
+        </div>
+      </div>
+      <div id="compare"></div>
+    </div>
   </main>
 
   <!-- ============ DOCUMENT EDITOR ============ -->

@@ -461,13 +461,86 @@
   });
 
   // ---------- compare ----------
-  function renderCompare() {
-    const L = Math.max(1, state.text.length);
-    const rows = STRATEGIES.map((s) => {
-      const res = runStrategy(s), st = statsOf(res.chunks);
-      return `<tr><td class="name"><a href="#/sim/${s.id}" style="--c:${s.color}"><i></i>${s.name}</a></td><td class="num">${st.n}</td><td class="num">${fmt(st.avg)}</td><td class="num range">${st.min}–${st.max}</td><td class="lane-cell">${laneHTML(res.chunks, L, s.color)}</td></tr>`;
+  // Splits [0, len) at every chunk edge; each piece lists the chunks covering it.
+  function coverage(len, chunks) {
+    const cuts = [...new Set([0, len, ...chunks.flatMap((c) => [c.start, c.end])])].sort((a, b) => a - b);
+    const segs = [];
+    for (let k = 0; k < cuts.length - 1; k++) {
+      const a = cuts[k], b = cuts[k + 1];
+      segs.push({ a, b, ids: chunks.filter((c) => c.start <= a && c.end >= b).map((c) => c.id) });
+    }
+    return segs;
+  }
+
+  // Beginner-friendly measures: words sliced at a chunk edge, and text stored twice.
+  function cutQuality(text, chunks, segs) {
+    const isWord = (ch) => !!ch && /[\p{L}\p{N}]/u.test(ch);
+    const splits = new Set();
+    chunks.forEach((c) => {
+      [c.start, c.end].forEach((p) => { if (p > 0 && p < text.length && isWord(text[p - 1]) && isWord(text[p])) splits.add(p); });
     });
-    $("#compare").innerHTML = `<table class="cmp"><thead><tr><th>Strategy</th><th class="num">Chunks</th><th class="num">Avg chars</th><th class="num range">Range</th><th>Position in document</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+    const repeated = segs.reduce((n, s) => n + (s.b - s.a) * Math.max(0, s.ids.length - 1), 0);
+    return { wordsCut: splits.size, repeatedPct: text.length ? (repeated / text.length) * 100 : 0 };
+  }
+
+  // One bar = the whole document; each chunk is a numbered block in the strategy colour.
+  function layoutHTML(text, chunks, segs, color) {
+    const L = Math.max(1, text.length);
+    const blocks = segs
+      .map((s) => {
+        if (!s.ids.length) return "";
+        const id = s.ids[s.ids.length - 1];
+        const cls = s.ids.length > 1 ? "blk ov" : `blk${id % 2 ? " alt" : ""}`;
+        const tip = s.ids.map((i) => `Chunk ${i + 1}: “${chunks[i].text.replace(/\s+/g, " ").slice(0, 60)}…”`).join("\n");
+        return `<i class="${cls}" title="${esc(tip)}" style="left:${(s.a / L) * 100}%;width:${((s.b - s.a) / L) * 100}%"></i>`;
+      })
+      .join("");
+    // Number each chunk at the start of the part it doesn't share with a neighbour.
+    const labels = chunks
+      .map((c, k) => {
+        const from = Math.max(c.start, k > 0 ? chunks[k - 1].end : 0);
+        const to = Math.min(c.end, k < chunks.length - 1 ? chunks[k + 1].start : c.end);
+        return (to - from) / L > 0.03 ? `<b style="left:${(from / L) * 100}%">${c.id + 1}</b>` : "";
+      })
+      .join("");
+    return `<div class="layout">${blocks}${labels}</div>`;
+  }
+
+  function renderCompare() {
+    const text = state.text;
+    const data = STRATEGIES.map((s) => {
+      const res = runStrategy(s), segs = coverage(text.length, res.chunks);
+      return { s, res, st: statsOf(res.chunks), q: cutQuality(text, res.chunks, segs), segs };
+    });
+
+    // takeaways in plain sentences
+    const most = data.reduce((a, b) => (b.st.n > a.st.n ? b : a));
+    const fewest = data.reduce((a, b) => (b.st.n < a.st.n ? b : a));
+    const cutters = data.filter((d) => d.q.wordsCut > 0).map((d) => d.s.name);
+    const repeaters = data.filter((d) => d.q.repeatedPct >= 0.5).map((d) => d.s.name);
+    const join = (xs) => (xs.length > 1 ? xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1] : xs[0]);
+    const card = (color, label, body) => `<div class="insight" style="--c:${color}"><div class="i-label">${label}</div><p>${body}</p></div>`;
+    $("#insights").innerHTML = [
+      card(most.s.color, "Most pieces", `<b>${most.s.name}</b> makes ${most.st.n} chunks — the smallest, most focused pieces.`),
+      card(fewest.s.color, "Fewest pieces", `<b>${fewest.s.name}</b> makes only ${fewest.st.n} chunk${fewest.st.n === 1 ? "" : "s"}, about ${fmt(fewest.st.avg)} characters each.`),
+      card("#E4572E", "Cuts words in half", cutters.length ? `<b>${join(cutters)}</b> slice${cutters.length === 1 ? "s" : ""} through the middle of words.` : "No strategy cuts a word in half on this document."),
+      card("#1683A8", "Repeats text", repeaters.length ? `<b>${join(repeaters)}</b> store${repeaters.length === 1 ? "s" : ""} some text twice (overlap), so ideas aren't lost at the edges.` : "No strategy repeats any text with the current settings."),
+    ].join("");
+
+    const rows = data.map(({ s, res, st, q, segs }) => `
+      <div class="c-row" style="--c:${s.color}">
+        <a class="c-name" href="#/sim/${s.id}"><i></i><span>${s.name}<small>Open in simulator →</small></span></a>
+        <div class="c-num"><b>${st.n}</b><small>chunks</small></div>
+        <div class="c-num"><b>${fmt(st.avg)}</b><small>avg chars</small></div>
+        <div class="c-num ${q.wordsCut ? "bad" : "good"}"><b>${q.wordsCut ? q.wordsCut : "None"}</b><small>words cut</small></div>
+        <div class="c-num"><b>${q.repeatedPct >= 0.5 ? fmt(q.repeatedPct) + "%" : "None"}</b><small>repeated</small></div>
+        <div class="c-bar">${layoutHTML(text, res.chunks, segs, s.color)}</div>
+      </div>`);
+    $("#compare").innerHTML = `
+      <div class="c-row c-head">
+        <span>Strategy</span><span class="c-num">Chunks</span><span class="c-num">Average size</span><span class="c-num">Words cut in half</span><span class="c-num">Repeated text</span>
+        <span class="c-axis"><span>Start of document</span><span>End</span></span>
+      </div>${rows.join("")}`;
   }
 
   // ---------- document ----------

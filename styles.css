@@ -501,6 +501,45 @@ textarea {
   font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--surface-2);
 }
 
+/* ============ info buttons + tooltip ============ */
+.lbl { display: inline-flex; align-items: center; gap: 6px; }
+.info {
+  display: inline-grid; place-items: center; flex: none;
+  width: 22px; height: 22px; margin: -4px -2px -4px 4px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--faint);
+  cursor: help; vertical-align: middle; transition: color 0.15s, background 0.15s;
+}
+.lbl .info { margin-left: 0; }
+.info:hover, .info:focus-visible { color: var(--s-text); background: color-mix(in srgb, var(--s) 12%, transparent); outline: none; }
+.stat .k { display: flex; align-items: center; }
+.c-head .c-num { display: flex; align-items: center; justify-content: flex-end; }
+.c-head .info { color: var(--faint); }
+
+#tip {
+  position: absolute; z-index: 50; width: max-content; max-width: min(300px, calc(100vw - 24px));
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--stage); color: var(--stage-text); border: 1px solid var(--stage-border);
+  font-size: 13.5px; line-height: 1.55; box-shadow: 0 14px 34px -10px rgb(0 0 0 / 0.45);
+  pointer-events: none; animation: tip-in 0.14s ease-out;
+}
+#tip strong { display: block; font-family: var(--serif); font-weight: 400; font-size: 18px; margin-bottom: 4px; }
+.h-what { display: block; }
+.h-move { display: block; margin-top: 8px; }
+.h-move b { font-weight: 600; }
+#tip .h-move { padding-top: 8px; border-top: 1px solid var(--stage-border); }
+#tip .h-move + .h-move { border-top: 0; padding-top: 0; margin-top: 4px; }
+#tip .h-move b { color: #f0a080; }
+.how .settings .h-move { margin-top: 4px; }
+.how .settings .h-move b { color: var(--text); }
+#tip::after {
+  content: ""; position: absolute; left: calc(var(--arrow) - 6px); width: 12px; height: 12px;
+  background: var(--stage); border: 1px solid var(--stage-border); transform: rotate(45deg);
+}
+#tip[data-side="top"]::after { bottom: -7px; border-top: 0; border-left: 0; }
+#tip[data-side="bottom"]::after { top: -7px; border-bottom: 0; border-right: 0; }
+@keyframes tip-in { from { opacity: 0; transform: translateY(3px); } }
+
 @media (prefers-reduced-motion: reduce) {
+  #tip { animation: none; }
   *, *::before, *::after { transition: none !important; }
 }
